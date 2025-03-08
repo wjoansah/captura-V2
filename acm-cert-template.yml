@@ -1,0 +1,25 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ACM Certificate for your domain with DNS validation in Route 53
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: "The domain name for the ACM certificate (e.g., *.captura.com)"
+  HostedZoneId:
+    Type: String
+    Description: "The Route 53 Hosted Zone ID for captura.com"
+
+Resources:
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId
+
+Outputs:
+  CertificateArn:
+    Description: "ARN of the ACM certificate"
+    Value: !Ref Certificate
