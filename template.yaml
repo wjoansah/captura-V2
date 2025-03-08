@@ -1,119 +1,382 @@
-# This is the SAM template that represents the architecture of your serverless application
-# https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-template-basics.html
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  captura
 
-# The AWSTemplateFormatVersion identifies the capabilities of the template
-# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/format-version-structure.html
-AWSTemplateFormatVersion: 2010-09-09
-Description: >-
-  captura_V2
+  SAM Template for captura
 
-# Transform section specifies one or more macros that AWS CloudFormation uses to process your template
-# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/transform-section-structure.html
-Transform:
-- AWS::Serverless-2016-10-31
+Globals:
+  Api:
+    EndpointConfiguration: REGIONAL
+    MethodSettings:
+      - ResourcePath: "/*"
+        LoggingLevel: INFO
+        HttpMethod: "*"
+        DataTraceEnabled: True
+    Auth:
+      DefaultAuthorizer: LambdaTokenAuthorizer
+      Authorizers:
+        LambdaTokenAuthorizer:
+          FunctionArn: !GetAtt AuthorizerFunction.Arn
+          Identity:
+            Headers:
+              - Authorization
+  Function:
+    CodeUri: src/handlers
+    Runtime: nodejs22.x
+    MemorySize: 128
+    Architectures:
+      - x86_64
+    Timeout: 100
+    Tracing: Active
 
-# Resources declares the AWS resources that you want to include in the stack
-# https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/resources-section-structure.html
+Parameters:
+  DevAuthCallbackUrl:
+    Type: String
+    Description: Auth callback in development
+    Default: http://localhost:3000
+  ProdAuthCallbackUrl:
+    Type: String
+    Description: Auth callback in production
+    Default: http://localhost:3000
+  PrimaryBucketName:
+    Type: String
+    Default: "captura-v2-bucket-primary"
+    Description: Primary bucket name
+  SecondaryPrimaryBucketName:
+    Type: String
+    Default: "captura-v2-bucket-primary-replica"
+    Description: Backup bucket
+  PrimaryStagingBucketName:
+    Type: String
+    Default: "captura-v2-staging-bucket"
+    Description: Primary staging bucket
+  SecondaryStagingBucketName:
+    Type: String
+    Default: "captura-v2-staging-bucket-replica"
+    Description: Backup staging bucket
+  ImageUploadMetadataTableName:
+    Type: String
+    Default: "image-upload-metadata-table"
+    Description: image upload metadata table
+  DomainName:
+    Type: String
+    Description: Custom domain name for your primary and backup API Gateway
+  PrimaryACMCertificateArn:
+    Type: String
+    Description: AWS Certificate Manager certificate for primary region
+  SecondaryACMCertificateArn:
+    Type: String
+    Description: AWS Certificate Manager certificate for backup region
+  PrimaryRegion:
+    Type: String
+    Default: "us-east-1"
+  SecondaryRegion:
+    Type: String
+    Default: "us-west-1"
+
+Conditions:
+  IsPrimaryRegion: !Equals [ !Ref AWS::Region, !Ref PrimaryRegion ]
+  IsSecondaryRegion: !Equals [ !Ref AWS::Region, !Ref SecondaryRegion ]
+
 Resources:
-  # Each Lambda function is defined by properties:
-  # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+  ApiGatewayDomainName:
+    Type: AWS::ApiGateway::DomainName
+    Properties:
+      DomainName: !Ref DomainName
+      RegionalCertificateArn: !If
+        - IsPrimaryRegion
+        - !Ref PrimaryACMCertificateArn
+        - !Ref BackupACMCertificateArn
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
 
-  # This is a Lambda function config associated with the source code: get-all-items.js
-  getAllItemsFunction:
+  CustomDomainBasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Properties:
+      DomainName: !Ref ApiGatewayDomainName
+      RestApiId: !Sub ${ServerlessRestApi}
+      Stage: !Sub ${ServerlessRestApiProdStage}
+
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${AWS::StackName}-UserPool
+      AutoVerifiedAttributes:
+        - email
+      Schema:
+        - Name: name
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+      UsernameAttributes:
+        - email
+      UserPoolTags:
+        Key: Name
+        Value: !Sub ${AWS::StackName} User Pool
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          TemporaryPasswordValidityDays: 7
+
+  # User Pool Client
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName:
+        !Sub ${AWS::StackName}-UserPoolClient
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      ReadAttributes:
+        - name
+      RefreshTokenValidity: 30
+      AccessTokenValidity: 6
+      IdTokenValidity: 6
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+      SupportedIdentityProviders:
+        - COGNITO
+      UserPoolId: !Ref UserPool
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - 'code'
+        - 'implicit'
+      AllowedOAuthScopes:
+        - 'email'
+        - 'openid'
+        - 'profile'
+      CallbackURLs:
+        - !Ref DevAuthCallbackUrl
+        - !Ref ProdAuthCallbackUrl
+
+  # User Pool Domain
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref UserPoolClient
+      UserPoolId: !Ref UserPool
+      ManagedLoginVersion: "2"
+
+  BrandedLogin:
+    Type: AWS::Cognito::ManagedLoginBranding
+    Properties:
+      ClientId: !Ref UserPoolClient
+      UserPoolId: !Ref UserPool
+      UseCognitoProvidedValues: true
+
+  ImageProcessingStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+      Policies:
+        - PolicyName: InvokeLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !GetAtt ImageProcessingFunction.Arn
+                  - !GetAtt CleanupFunction.Arn
+                  - !GetAtt SendNotificationFunction.Arn
+                  - !GetAtt AddDynamoDbEntryFunction.Arn
+        - PolicyName: StagingBucketReadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub
+                    - arn:aws:s3:::${StagingBucket}/*
+                    - StagingBucket: !If
+                        - IsPrimaryRegion
+                        - !Ref PrimaryStagingBucketName
+                        - !Ref SecondaryStagingBucketName
+        - PolicyName: PrimaryBucketWritePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub
+                    - arn:aws:s3:::${PrimaryBucket}/*
+                    - PrimaryBucket: !If
+                        - IsPrimaryRegion
+                        - !Ref PrimaryBucketName
+                        - !Ref SecondaryPrimaryBucketName
+
+  ImageProcessingStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub ${AWS::StackName}-ImageProcessingStateMachine
+      DefinitionUri: src/statemachine/imageProcessor.asl.json
+      DefinitionSubstitutions:
+        ImageProcessingFunctionArn: !GetAtt ImageProcessingFunction.Arn
+        CleanupFunctionArn: !GetAtt CleanupFunction.Arn
+        SendNotificationFunctionArn: !GetAtt SendNotificationFunction.Arn
+        AddDynamoDbEntryFunction: !GetAtt AddDynamoDbEntryFunction.Arn
+      Role: !GetAtt ImageProcessingStateMachineRole.Arn
+      Events:
+        EBPutRule:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.s3
+              detail-type:
+                - Object Created
+              detail:
+                bucket:
+                  name:
+                    - !If
+                      - IsPrimaryRegion
+                      - !Ref PrimaryStagingBucketName
+                      - !Ref SecondaryStagingBucketName
+
+  AuthorizerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: src/handlers/get-all-items.getAllItemsHandler
-      Runtime: nodejs22.x
-      Architectures:
-        - x86_64
-      MemorySize: 128
-      Timeout: 100
-      Description: A simple example includes a HTTP get method to get all items from a DynamoDB table.
-      Policies:
-        # Give Create/Read/Update/Delete Permissions to the SampleTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref SampleTable
+      Handler: authorizer.handler
+      Description: Handler for Lambda authorizer
       Environment:
         Variables:
-          # Make table name accessible as environment variable from function code during execution
-          SAMPLE_TABLE: !Ref SampleTable
-      Events:
-        Api:
-          Type: Api
-          Properties:
-            Path: /
-            Method: GET
-  # Each Lambda function is defined by properties:
-  # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+          USER_POOL_ID: !Ref UserPool
+          APP_CLIENT_ID: !Ref UserPoolClient
+      Tags:
+        Stack: !Sub "${AWS::StackName}"
 
-  # This is a Lambda function config associated with the source code: get-by-id.js
-  getByIdFunction:
+  UploadImageFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: src/handlers/get-by-id.getByIdHandler
-      Runtime: nodejs22.x
-      Architectures:
-        - x86_64
-      MemorySize: 128
-      Timeout: 100
-      Description: A simple example includes a HTTP get method to get one item by id from a DynamoDB table.
+      Handler: upload.handler
       Policies:
-        # Give Create/Read/Update/Delete Permissions to the SampleTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref SampleTable
-      Environment:
-        Variables:
-          # Make table name accessible as environment variable from function code during execution
-          SAMPLE_TABLE: !Ref SampleTable
+        - AWSLambdaBasicExecutionRole
+        - S3WritePolicy:
+            BucketName:
+              - !If
+                - IsPrimaryRegion
+                - !Ref PrimaryStagingBucketName
+                - !Ref SecondaryStagingBucketName
       Events:
-        Api:
+        UploadImageEvent:
           Type: Api
           Properties:
-            Path: /{id}
-            Method: GET
-  # Each Lambda function is defined by properties:
-  # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
-
-  # This is a Lambda function config associated with the source code: put-item.js
-  putItemFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: src/handlers/put-item.putItemHandler
-      Runtime: nodejs22.x
-      Architectures:
-        - x86_64
-      MemorySize: 128
-      Timeout: 100
-      Description: A simple example includes a HTTP post method to add one item to a DynamoDB table.
-      Policies:
-        # Give Create/Read/Update/Delete Permissions to the SampleTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref SampleTable
-      Environment:
-        Variables:
-          # Make table name accessible as environment variable from function code during execution
-          SAMPLE_TABLE: !Ref SampleTable
-      Events:
-        Api:
-          Type: Api
-          Properties:
-            Path: /
+            Path: /upload
             Method: POST
-  # Simple syntax to create a DynamoDB table with a single attribute primary key, more in
-  # https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlesssimpletable
 
-  # DynamoDB table to store item: {id: &lt;ID&gt;, name: &lt;NAME&gt;}
-  SampleTable:
-    Type: AWS::Serverless::SimpleTable
+  ImageProcessingFunction:
+    Type: AWS::Serverless::Function
     Properties:
-      PrimaryKey:
-        Name: id
-        Type: String
-      ProvisionedThroughput:
-        ReadCapacityUnits: 2
-        WriteCapacityUnits: 2
+      Handler: processImage.handler
+      Environment:
+        Variables:
+          PRIMARY_BUCKET_NAME: !If
+            - IsPrimaryRegion
+            - !Ref PrimaryBucketName
+            - !Ref SecondaryPrimaryBucketName
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                - !If
+                  - IsPrimaryRegion
+                  - !Ref PrimaryStagingBucketName
+                  - !Ref SecondaryStagingBucketName
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                - !If
+                  - IsPrimaryRegion
+                  - !Ref PrimaryBucketName
+                  - !Ref SecondaryPrimaryBucketName
 
-Outputs:
-  WebEndpoint:
-    Description: "API Gateway endpoint URL for Prod stage"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  CleanupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: cleanup.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:DeleteObject
+              Resource:
+                - !If
+                  - IsPrimaryRegion
+                  - !Ref PrimaryStagingBucketName
+                  - !Ref SecondaryStagingBucketName
+
+  SendNotificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: sendNotification.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+
+  ShareImageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: shareImage.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ImageUploadMetadataTableName
+      Environment:
+        Variables:
+          PRIMARY_BUCKET_NAME: !If
+            - IsPrimaryRegion
+            - !Ref PrimaryBucketName
+            - !Ref SecondaryPrimaryBucketName
+      Events:
+        ShareImageEvent:
+          Type: Api
+          Properties:
+            Path: "/images/{id}/share"
+            Method: GET
+
+  AddDynamoDbEntryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: addDynamoEntry.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ImageUploadMetadataTableName
+      Environment:
+        Variables:
+          UPLOAD_METADATA_TABLE_NAME: !Ref ImageUploadMetadataTableName
