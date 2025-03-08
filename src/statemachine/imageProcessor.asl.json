@@ -1,0 +1,55 @@
+{
+  "Comment": "Image processing state machine",
+  "StartAt": "ProcessImage",
+  "States": {
+    "ProcessImage": {
+      "Type": "Task",
+      "Resource": "${ImageProcessingFunctionArn}",
+      "ResultPath": "$",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 300,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "SendFailureNotification"
+        }
+      ],
+      "Next": "AddDynamoDbEntry"
+    },
+    "AddDynamoDbEntry": {
+      "Type": "Task",
+      "Resource": "${AddDynamoDbEntryFunction}",
+      "ResultPath": "$",
+      "Parameters": {
+        "bucket.$": "$.bucket",
+        "key.$": "$.key",
+        "metaData.$": "$.metaData"
+      },
+      "Next": "DeleteOriginalImage"
+    },
+    "DeleteOriginalImage": {
+      "Type": "Task",
+      "Resource": "${CleanupFunctionArn}",
+      "Parameters": {
+        "bucket.$": "$.bucket",
+        "key.$": "$.key"
+      },
+      "End": true
+    },
+    "SendFailureNotification": {
+      "Type": "Task",
+      "Resource": "${SendNotificationFunctionArn}",
+      "End": true
+    }
+  }
+}
