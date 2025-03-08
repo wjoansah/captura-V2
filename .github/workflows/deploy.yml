@@ -1,0 +1,104 @@
+name: Captura CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+
+env:
+  AWS_REGION_PRIMARY: ${{ secrets.AWS_REGION }}
+  AWS_REGION SECONDARY: ${{ secrets.SECONDARY_REGION }}
+
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_KEY }}
+
+  PRIMARY_DOMAIN_NAME: ${{ secrets.PRIMARY_DOMAIN_NAME }}
+  SECONDARY_DOMAIN_NAME: ${{ secrets.SECONDARY_DOMAIN_NAME }}
+
+  PRIMARY_ACM_CERTIFICATE_ARN: ${{ secrets.PRIMARY_ACM_CERTIFICATE_ARN }}
+  SECONDARY_ACM_CERTIFICATE_ARN: ${{ secrets.SECONDARY_ACM_CERTIFICATE_ARN }}
+
+  PROD_AUTH_CALLBACK_URL: ${{ secrets.PROD_AUTH_CALLBACK_URL }}
+
+jobs:
+  deploy-primary:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION_PRIMARY }}
+
+      - name: SAM Validate
+        run: sam validate
+
+      - name: SAM Build [Primary]
+        run: |
+          sam build \
+            --region ${{ env.AWS_REGION_PRIMARY }} \
+            --parameter-overrides \
+              Environment=development \
+              PrimaryRegion=${{ env.AWS_REGION_PRIMARY }} \
+              SecondaryRegion=${{ env.AWS_REGION_SECONDARY }}
+
+      - name: Deploy to Primary Region
+        run: |
+          sam deploy \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --stack-name captura-v2-dev \
+            --s3-bucket captura-dev-deployment-bucket \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+            --region ${{ env.AWS_REGION_PRIMARY }} \
+            --parameter-overrides \
+              Environment=development \
+              PrimaryRegion=${{ env.AWS_REGION_PRIMARY }} \
+              SecondaryRegion=${{ env.AWS_REGION_SECONDARY }} \
+              ProdAuthCallbackUrl=${{ env.PROD_AUTH_CALLBACK_URL }} \
+              DomainName=${{ env.PRIMARY_DOMAIN_NAME }} \
+              PrimaryACMCertificateArn=${{ env.PRIMARY_ACM_CERTIFICATE_ARN }} \
+              SecondaryACMCertificateArn=${{ env.SECONDARY_ACM_CERTIFICATE_ARN }}
+
+  deploy-secondary:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Configure AWS Credentials (Primary Region)
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION_SECONDARY }}
+
+      - name: SAM Build [Secondary]
+        run: |
+          sam build \
+            --region ${{ env.AWS_REGION_PRIMARY }} \
+            --parameter-overrides \
+              Environment=production \
+              PrimaryRegion=${{ env.AWS_REGION_PRIMARY }} \
+              SecondaryRegion=${{ env.AWS_REGION_SECONDARY }}
+
+      - name: Deploy to Secondary Region
+        run: |
+          sam deploy \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --stack-name captura-v2-dev \
+            --s3-bucket captura-dev-deployment-bucket \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+            --region ${{ env.AWS_REGION_SECONDARY }} \
+            --parameter-overrides \
+              Environment=development \
+              PrimaryRegion=${{ env.AWS_REGION_PRIMARY }} \
+              SecondaryRegion=${{ env.AWS_REGION_SECONDARY }} \
+              ProdAuthCallbackUrl=${{ env.PROD_AUTH_CALLBACK_URL }} \
+              DomainName=${{ env.SECONDARY_DOMAIN_NAME }} \
+              PrimaryACMCertificateArn=${{ env.PRIMARY_ACM_CERTIFICATE_ARN }} \
+              SecondaryACMCertificateArn=${{ env.SECONDARY_ACM_CERTIFICATE_ARN }}
