@@ -1,0 +1,197 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: S3 bucket creation and replication
+
+Parameters:
+  PrimaryBucketName:
+    Type: String
+    Default: "captura-v2-bucket-primary"
+    Description: Primary bucket
+  SecondaryPrimaryBucketName:
+    Type: String
+    Default: "captura-v2-bucket-primary-replica"
+    Description: Backup bucket
+  PrimaryStagingBucketName:
+    Type: String
+    Default: "captura-v2-staging-bucket"
+    Description: Primary staging bucket
+  SecondaryStagingBucketName:
+    Type: String
+    Default: "captura-v2-staging-bucket-replica"
+    Description: Backup staging bucket
+  PrimaryRegion:
+    Type: String
+    Default: "us-east-1"
+    Description: Primary region for disaster recovery
+  SecondaryRegion:
+    Type: String
+    Default: "us-west-1"
+    Description: Secondary region for disaster recovery
+
+Conditions:
+  IsPrimaryRegion: !Equals [ !Ref AWS::Region, !Ref PrimaryRegion ]
+  IsSecondaryRegion: !Equals [ !Ref AWS::Region, !Ref SecondaryRegion ]
+
+Resources:
+  PrimaryBucket:
+    Type: AWS::S3::Bucket
+    Condition: IsPrimaryRegion
+    Properties:
+      BucketName: !Ref PrimaryBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      VersioningConfiguration:
+        Status: Enabled
+      ReplicationConfiguration:
+        Role: !GetAtt S3ReplicationRole.Arn
+        Rules:
+          - Status: Enabled
+            Priority: 1
+            Filter:
+              Prefix: ""
+            DeleteMarkerReplication:
+              Status: Enabled
+            Destination:
+              Bucket: !Sub arn:aws:s3:::${SecondaryPrimaryBucketName}
+
+  SecondaryPrimaryBucket:
+    Type: AWS::S3::Bucket
+    Condition: IsSecondaryRegion
+    Properties:
+      BucketName: !Ref SecondaryPrimaryBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      VersioningConfiguration:
+        Status: Enabled
+
+  PrimaryStagingBucket:
+    Type: AWS::S3::Bucket
+    Condition: IsPrimaryRegion
+    Properties:
+      BucketName: !Ref PrimaryStagingBucketName
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  SecondaryStagingBucket:
+    Type: AWS::S3::Bucket
+    Condition: IsSecondaryRegion
+    Properties:
+      BucketName: !Ref SecondaryStagingBucketName
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  PrimaryStagingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: IsPrimaryRegion
+    Properties:
+      Bucket: !Ref PrimaryStagingBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action:
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:GetObject
+            Resource: !Sub 'arn:aws:s3:::${PrimaryStagingBucketName}/*'
+
+  SecondaryStagingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: IsSecondaryRegion
+    Properties:
+      Bucket: !Ref SecondaryStagingBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action:
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:GetObject
+            Resource: !Sub 'arn:aws:s3:::${SecondaryStagingBucketName}/*'
+
+  PrimaryBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: IsPrimaryRegion
+    Properties:
+      Bucket: !Ref PrimaryBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action:
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:GetObject
+            Resource: !Sub 'arn:aws:s3:::${PrimaryBucketName}/*'
+
+  SecondaryPrimaryBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: IsSecondaryRegion
+    Properties:
+      Bucket: !Ref SecondaryPrimaryBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action:
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:GetObject
+            Resource: !Sub 'arn:aws:s3:::${SecondaryPrimaryBucketName}/*'
+
+  # S3 replication role (created in Primary Region)
+  S3ReplicationRole:
+    Type: AWS::IAM::Role
+    Condition: IsPrimaryRegion
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3ReplicationPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObjectVersionForReplication
+                  - s3:GetObjectVersionAcl
+                  - s3:GetObjectVersionTagging
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${PrimaryBucketName}"
+                  - !Sub "arn:aws:s3:::${PrimaryBucketName}/*"
+              - Effect: Allow
+                Action:
+                  - s3:ReplicateObject
+                  - s3:ReplicateDelete
+                  - s3:ReplicateTags
+                  - s3:ObjectOwnerOverrideToBucketOwner
+                Resource:
+                  - !Sub "arn:aws:s3:::${SecondaryPrimaryBucketName}/*"
