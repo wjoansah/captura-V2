@@ -52,7 +52,6 @@ jobs:
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --stack-name captura-v2-dev \
-            --s3-bucket captura-dev-deployment-bucket \
             --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
             --region ${{ env.AWS_REGION_PRIMARY }} \
             --parameter-overrides \
@@ -91,7 +90,6 @@ jobs:
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --stack-name captura-v2-dev \
-            --s3-bucket captura-dev-deployment-bucket \
             --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
             --region ${{ env.AWS_REGION_SECONDARY }} \
             --parameter-overrides \
