@@ -249,10 +249,11 @@ Resources:
                 - Object Created
               detail:
                 bucket:
-                  name: !If
-                    - IsPrimaryRegion
-                    - !Ref PrimaryStagingBucketName
-                    - !Ref SecondaryStagingBucketName
+                  name:
+                    - !If
+                      - IsPrimaryRegion
+                      - !Ref PrimaryStagingBucketName
+                      - !Ref SecondaryStagingBucketName
 
   AuthorizerFunction:
     Type: AWS::Serverless::Function
