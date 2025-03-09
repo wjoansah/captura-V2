@@ -77,7 +77,6 @@ Parameters:
 
 Conditions:
   IsPrimaryRegion: !Equals [ !Ref AWS::Region, !Ref PrimaryRegion ]
-  IsSecondaryRegion: !Equals [ !Ref AWS::Region, !Ref SecondaryRegion ]
 
 Resources:
   ApiGatewayDomainName:
@@ -87,7 +86,7 @@ Resources:
       RegionalCertificateArn: !If
         - IsPrimaryRegion
         - !Ref PrimaryACMCertificateArn
-        - !Ref BackupACMCertificateArn
+        - !Ref SecondaryACMCertificateArn
       EndpointConfiguration:
         Types:
           - REGIONAL
@@ -211,13 +210,10 @@ Resources:
               - Effect: Allow
                 Action:
                   - s3:GetObject
-                Resource:
-                  - !Sub
-                    - arn:aws:s3:::${StagingBucket}/*
-                    - StagingBucket: !If
-                        - IsPrimaryRegion
-                        - !Ref PrimaryStagingBucketName
-                        - !Ref SecondaryStagingBucketName
+                Resource: !If
+                  - IsPrimaryRegion
+                  - !Sub "arn:aws:s3:::${PrimaryStagingBucketName}/*"
+                  - !Sub "arn:aws:s3:::${SecondaryStagingBucketName}/*"
         - PolicyName: PrimaryBucketWritePolicy
           PolicyDocument:
             Version: '2012-10-17'
@@ -226,13 +222,10 @@ Resources:
                 Action:
                   - s3:PutObject
                   - s3:DeleteObject
-                Resource:
-                  - !Sub
-                    - arn:aws:s3:::${PrimaryBucket}/*
-                    - PrimaryBucket: !If
-                        - IsPrimaryRegion
-                        - !Ref PrimaryBucketName
-                        - !Ref SecondaryPrimaryBucketName
+                Resource: !If
+                  - IsPrimaryRegion
+                  - !Sub "arn:aws:s3:::${PrimaryBucketName}/*"
+                  - !Sub "arn:aws:s3:::${SecondaryPrimaryBucketName}/*"
 
   ImageProcessingStateMachine:
     Type: AWS::Serverless::StateMachine
@@ -256,11 +249,10 @@ Resources:
                 - Object Created
               detail:
                 bucket:
-                  name:
-                    - !If
-                      - IsPrimaryRegion
-                      - !Ref PrimaryStagingBucketName
-                      - !Ref SecondaryStagingBucketName
+                  name: !If
+                    - IsPrimaryRegion
+                    - !Ref PrimaryStagingBucketName
+                    - !Ref SecondaryStagingBucketName
 
   AuthorizerFunction:
     Type: AWS::Serverless::Function
@@ -281,11 +273,10 @@ Resources:
       Policies:
         - AWSLambdaBasicExecutionRole
         - S3WritePolicy:
-            BucketName:
-              - !If
-                - IsPrimaryRegion
-                - !Ref PrimaryStagingBucketName
-                - !Ref SecondaryStagingBucketName
+            BucketName: !If
+              - IsPrimaryRegion
+              - !Ref PrimaryStagingBucketName
+              - !Ref SecondaryStagingBucketName
       Events:
         UploadImageEvent:
           Type: Api
@@ -310,21 +301,19 @@ Resources:
             - Effect: Allow
               Action:
                 - s3:GetObject
-              Resource:
-                - !If
-                  - IsPrimaryRegion
-                  - !Ref PrimaryStagingBucketName
-                  - !Ref SecondaryStagingBucketName
+              Resource: !If
+                - IsPrimaryRegion
+                - !Sub "arn:aws:s3:::${PrimaryStagingBucketName}/*"
+                - !Sub "arn:aws:s3:::${SecondaryStagingBucketName}/*"
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
               Action:
                 - s3:PutObject
-              Resource:
-                - !If
-                  - IsPrimaryRegion
-                  - !Ref PrimaryBucketName
-                  - !Ref SecondaryPrimaryBucketName
+              Resource: !If
+                - IsPrimaryRegion
+                - !Sub "arn:aws:s3:::${PrimaryBucketName}/*"
+                - !Sub "arn:aws:s3:::${SecondaryPrimaryBucketName}/*"
 
   CleanupFunction:
     Type: AWS::Serverless::Function
@@ -337,11 +326,10 @@ Resources:
             - Effect: Allow
               Action:
                 - s3:DeleteObject
-              Resource:
-                - !If
-                  - IsPrimaryRegion
-                  - !Ref PrimaryStagingBucketName
-                  - !Ref SecondaryStagingBucketName
+              Resource: !If
+                - IsPrimaryRegion
+                - !Sub "arn:aws:s3:::${PrimaryStagingBucketName}/*"
+                - !Sub "arn:aws:s3:::${SecondaryStagingBucketName}/*"
 
   SendNotificationFunction:
     Type: AWS::Serverless::Function
