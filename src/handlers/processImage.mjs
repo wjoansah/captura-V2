@@ -5,7 +5,6 @@ import {
 } from '@aws-sdk/client-s3';
 import {BlendMode, Jimp, JimpMime, loadFont, measureText, measureTextHeight} from 'jimp';
 import {Readable} from 'node:stream';
-import path from 'node:path';
 
 const s3 = new S3Client({});
 const PRIMARY_BUCKET_NAME = process.env.PRIMARY_BUCKET_NAME;
@@ -33,7 +32,7 @@ export const handler = async (event, context) => {
 
         const watermarkText = Metadata?.username ?? 'captura-watermark';
 
-        const fontPath = path.join(__dirname, '/node_modules/@jimp/plugin-print/fonts/open-sans/open-sans-32-white/open-sans-32-white.fnt')
+        const fontPath = 'node_modules/@jimp/plugin-print/fonts/open-sans/open-sans-32-white/open-sans-32-white.fnt'
         const font = await loadFont(fontPath);
 
         const textWidth = measureText(font, watermarkText);
