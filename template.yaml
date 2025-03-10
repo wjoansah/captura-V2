@@ -272,6 +272,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: upload.handler
+      MemorySize: 256
       Policies:
         - AWSLambdaBasicExecutionRole
         - S3WritePolicy:
