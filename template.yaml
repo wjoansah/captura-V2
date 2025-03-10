@@ -204,29 +204,6 @@ Resources:
                   - !GetAtt CleanupFunction.Arn
                   - !GetAtt SendNotificationFunction.Arn
                   - !GetAtt AddDynamoDbEntryFunction.Arn
-        - PolicyName: StagingBucketReadPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                Resource: !If
-                  - IsPrimaryRegion
-                  - !Sub "arn:aws:s3:::${PrimaryStagingBucketName}/*"
-                  - !Sub "arn:aws:s3:::${SecondaryStagingBucketName}/*"
-        - PolicyName: PrimaryBucketWritePolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:DeleteObject
-                Resource: !If
-                  - IsPrimaryRegion
-                  - !Sub "arn:aws:s3:::${PrimaryBucketName}/*"
-                  - !Sub "arn:aws:s3:::${SecondaryPrimaryBucketName}/*"
 
   ImageProcessingStateMachine:
     Type: AWS::Serverless::StateMachine
@@ -307,6 +284,13 @@ Resources:
         - AWSLambdaBasicExecutionRole
         - Version: '2012-10-17'
           Statement:
+            - Effect: Allow
+              Action:
+                - s3:ListBucket
+              Resource: !If
+                - IsPrimaryRegion
+                - !Sub "arn:aws:s3:::${PrimaryStagingBucketName}"
+                - !Sub "arn:aws:s3:::${SecondaryStagingBucketName}"
             - Effect: Allow
               Action:
                 - s3:GetObject
