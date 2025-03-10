@@ -37,6 +37,9 @@ jobs:
       - name: SAM Validate
         run: sam validate
 
+      - name: Copy package.json
+        run: cp package.json src/handlers
+
       - name: SAM Build [Primary]
         run: |
           sam build \
@@ -74,6 +77,9 @@ jobs:
           aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION_SECONDARY }}
+
+      - name: Copy package.json
+        run: cp package.json src/handlers
 
       - name: SAM Build [Secondary]
         run: |
