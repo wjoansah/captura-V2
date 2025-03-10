@@ -140,6 +140,7 @@ Resources:
       GenerateSecret: false
       PreventUserExistenceErrors: ENABLED
       ReadAttributes:
+        - email
         - name
       RefreshTokenValidity: 30
       AccessTokenValidity: 6
