@@ -279,6 +279,12 @@ Resources:
               - IsPrimaryRegion
               - !Ref PrimaryStagingBucketName
               - !Ref SecondaryStagingBucketName
+      Environment:
+        Variables:
+          STAGING_BUCKET_NAME: !If
+            - IsPrimaryRegion
+            - !Ref PrimaryStagingBucketName
+            - !Ref SecondaryStagingBucketName
       Events:
         UploadImageEvent:
           Type: Api
