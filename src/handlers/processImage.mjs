@@ -50,7 +50,7 @@ export const handler = async (event, context) => {
         // Composite the watermark onto the original image
         image.composite(watermark, x, y, {
             mode: BlendMode.SRC_OVER,
-            opacitySource: 1,
+            opacitySource: 0.5,
         });
 
         // Get the buffer of the modified image
