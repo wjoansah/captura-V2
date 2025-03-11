@@ -355,7 +355,7 @@ Resources:
   AddDynamoDbEntryFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: addDynamoEntry.handler
+      Handler: addDynamodbEntry.handler
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ImageUploadMetadataTableName
