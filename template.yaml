@@ -249,7 +249,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: upload.handler
-      MemorySize: 256
+      MemorySize: 512
       Policies:
         - AWSLambdaBasicExecutionRole
         - S3WritePolicy:
@@ -274,6 +274,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: processImage.handler
+      MemorySize: 512
       Environment:
         Variables:
           PRIMARY_BUCKET_NAME: !If
